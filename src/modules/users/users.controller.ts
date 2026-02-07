@@ -28,27 +28,67 @@ export async function me(req: Request, res: Response): Promise<void> {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
+  const userId = req.user.id;
   const user = await prisma.user.findUnique({
-    where: { id: req.user.id, deletedAt: null },
+    where: { id: userId, deletedAt: null },
     select: {
       id: true,
       phone: true,
+      email: true,
       name: true,
+      fullName: true,
+      username: true,
+      avatarUrl: true,
+      profileImageUrl: true,
       role: true,
-      domainId: true,
-      teamId: true,
-      reportingManagerId: true,
+      isActive: true,
+      onboardingCompleted: true,
       reputationScore: true,
-      domain: { select: { id: true, name: true } },
-      team: { select: { id: true, name: true } },
-      reportingManager: { select: { id: true, name: true } },
+      team: { select: { name: true } },
+      reportingManager: { select: { name: true } },
     },
   });
   if (!user) {
     res.status(404).json({ error: 'User not found' });
     return;
   }
-  res.json(user);
+
+  const [tasksCompleted, daysWorked] = await Promise.all([
+    prisma.taskVerification.count({ where: { assigneeId: userId, approved: true } }),
+    prisma.attendance.count({ where: { userId } }),
+  ]);
+
+  const userName =
+    user.email?.split('@')[0] ||
+    user.phone ||
+    user.username ||
+    user.id.slice(0, 8);
+  const avatarUrl = user.avatarUrl ?? user.profileImageUrl ?? null;
+  const isProfileComplete = !!(
+    user.name &&
+    user.name.length > 1 &&
+    !user.name.startsWith('User ') &&
+    !user.name.startsWith('Wallet ')
+  );
+
+  res.json({
+    user: {
+      id: user.id,
+      userName,
+      name: user.fullName ?? user.name,
+      email: user.email ?? null,
+      avatarUrl,
+      role: user.role,
+      status: user.isActive ? 'ACTIVE' : 'INACTIVE',
+      onboardingComplete: user.onboardingCompleted,
+      isProfileComplete,
+      contributionScore: user.reputationScore ?? 0,
+      tasksCompleted,
+      daysWorked,
+      team: user.team?.name ?? null,
+      reportingTo: user.reportingManager?.name ?? null,
+    },
+  });
 }
 
 export async function list(req: Request, res: Response): Promise<void> {
@@ -151,7 +191,7 @@ export async function create(req: Request, res: Response): Promise<void> {
     const actor = req.user!;
 
     // Hierarchy: cannot create user with higher role
-    if (!canManage(actor.role, body.role as UserRole)) {
+    if (!canManage(actor.role as UserRole, body.role as UserRole)) {
       res.status(403).json({ error: 'Cannot create user with higher role' });
       return;
     }
@@ -219,7 +259,7 @@ export async function update(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    if (!canManage(actor.role, target.role)) {
+    if (!canManage(actor.role as UserRole, target.role as UserRole)) {
       res.status(403).json({ error: 'Cannot update user with higher role' });
       return;
     }
@@ -233,7 +273,7 @@ export async function update(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    if (body.role && !canManage(actor.role, body.role as UserRole)) {
+    if (body.role && !canManage(actor.role as UserRole, body.role as UserRole)) {
       res.status(403).json({ error: 'Cannot assign higher role' });
       return;
     }
