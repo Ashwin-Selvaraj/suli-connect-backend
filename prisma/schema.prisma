@@ -1,0 +1,278 @@
+// SULI Connect - Prisma Schema
+// Hierarchical operations platform for rural village management
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  DOMAIN_HEAD
+  TEAM_LEAD
+  SENIOR_WORKER
+  WORKER
+  VOLUNTEER
+  VISITOR
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+}
+
+// ============================================================================
+// USERS & HIERARCHY
+// ============================================================================
+
+model User {
+  id                String    @id @default(cuid())
+  phone             String    @unique
+  name              String
+  role              UserRole
+  passwordHash      String    @map("password_hash")
+  isActive          Boolean   @default(true) @map("is_active")
+  deletedAt         DateTime? @map("deleted_at") // Soft delete
+
+  // Hierarchy
+  domainId          String?   @map("domain_id")
+  teamId            String?   @map("team_id")
+  reportingManagerId String?  @map("reporting_manager_id")
+
+  // Relations
+  domain            Domain?   @relation(fields: [domainId], references: [id])
+  team              Team?     @relation(fields: [teamId], references: [id])
+  reportingManager  User?     @relation("ReportingHierarchy", fields: [reportingManagerId], references: [id])
+  directReports     User[]    @relation("ReportingHierarchy")
+  ledTeam           Team?     @relation("TeamLead")
+
+  // Task relations
+  assignedTasks     TaskAssignment[]
+  taskUpdates       TaskUpdate[]
+  verificationsGiven TaskVerification[] @relation("ValidatorVerifications")
+  tasksVerified     TaskVerification[]  @relation("AssigneeVerifications")
+
+  // Attendance
+  attendances       Attendance[]
+
+  // Reputation (derived, stored for performance)
+  reputationScore   Int       @default(0) @map("reputation_score")
+  reputationLogs    ReputationLog[]
+
+  // Audit & notifications
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+// ============================================================================
+// DOMAINS & TEAMS
+// ============================================================================
+
+model Domain {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  deletedAt   DateTime? @map("deleted_at")
+
+  users       User[]
+  teams       Team[]
+  tasks       Task[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("domains")
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  domainId    String   @map("domain_id")
+  leadId      String?  @unique @map("lead_id")
+  isActive    Boolean  @default(true) @map("is_active")
+  deletedAt   DateTime? @map("deleted_at")
+
+  domain      Domain   @relation(fields: [domainId], references: [id])
+  lead        User?    @relation("TeamLead", fields: [leadId], references: [id])
+  users       User[]
+  tasks       Task[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([domainId, name])
+  @@map("teams")
+}
+
+// ============================================================================
+// ATTENDANCE
+// ============================================================================
+
+model Attendance {
+  id           String    @id @default(cuid())
+  userId       String    @map("user_id")
+  date         DateTime  @db.Date
+  checkInAt    DateTime? @map("check_in_at")
+  checkOutAt   DateTime? @map("check_out_at")
+  isOverridden Boolean   @default(false) @map("is_overridden")
+  overrideBy   String?   @map("override_by") // Admin user ID who overrode
+  overrideReason String? @map("override_reason")
+
+  user         User      @relation(fields: [userId], references: [id])
+
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@unique([userId, date])
+  @@map("attendance")
+}
+
+// ============================================================================
+// TASKS
+// ============================================================================
+
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  domainId    String     @map("domain_id")
+  teamId      String     @map("team_id")
+  status      TaskStatus @default(NOT_STARTED)
+
+  domain      Domain     @relation(fields: [domainId], references: [id])
+  team        Team       @relation(fields: [teamId], references: [id])
+
+  assignments TaskAssignment[]
+  updates     TaskUpdate[]
+  verifications TaskVerification[]
+
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  deletedAt   DateTime?  @map("deleted_at")
+
+  @@map("tasks")
+}
+
+model TaskAssignment {
+  id         String   @id @default(cuid())
+  taskId     String   @map("task_id")
+  userId     String   @map("user_id")
+  isValidator Boolean @default(false) @map("is_validator") // Can verify this task
+
+  task       Task     @relation(fields: [taskId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([taskId, userId])
+  @@map("task_assignments")
+}
+
+model TaskUpdate {
+  id        String   @id @default(cuid())
+  taskId    String   @map("task_id")
+  userId    String   @map("user_id")
+  comment   String?
+  proofUrls String[] @map("proof_urls") // URLs to proof (photos, documents)
+  statusChange TaskStatus? @map("status_change")
+
+  task      Task     @relation(fields: [taskId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("task_updates")
+}
+
+model TaskVerification {
+  id          String   @id @default(cuid())
+  taskId      String   @map("task_id")
+  assigneeId  String   @map("assignee_id") // User whose task was verified
+  validatorId String   @map("validator_id") // User who verified
+  approved    Boolean  // true = VERIFIED, false = REJECTED
+  comment     String?
+  isAdminOverride Boolean @default(false) @map("is_admin_override")
+
+  task        Task     @relation(fields: [taskId], references: [id])
+  assignee    User     @relation("AssigneeVerifications", fields: [assigneeId], references: [id])
+  validator   User     @relation("ValidatorVerifications", fields: [validatorId], references: [id])
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("task_verifications")
+}
+
+// ============================================================================
+// REPUTATION (append-only logs)
+// ============================================================================
+
+model ReputationLog {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  delta      Int      // Change in reputation (+/-)
+  reason     String   // e.g. "VERIFIED_TASK", "ATTENDANCE_CONSISTENCY", "VERIFICATION_ACCURACY"
+  referenceId String? @map("reference_id") // Task/Attendance ID for audit
+
+  user       User     @relation(fields: [userId], references: [id])
+
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("reputation_logs")
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  title     String
+  body      String?
+  isRead    Boolean   @default(false) @map("is_read")
+
+  user      User      @relation(fields: [userId], references: [id])
+
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+// ============================================================================
+// AUDIT LOGS (all admin actions)
+// ============================================================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String   @map("actor_id")
+  action     String   // e.g. "USER_UPDATE", "ATTENDANCE_OVERRIDE"
+  entityType String   @map("entity_type") // e.g. "user", "attendance"
+  entityId   String?  @map("entity_id")
+  payload    String?  // JSON of changes
+  ipAddress  String?  @map("ip_address")
+
+  actor      User     @relation(fields: [actorId], references: [id])
+
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
