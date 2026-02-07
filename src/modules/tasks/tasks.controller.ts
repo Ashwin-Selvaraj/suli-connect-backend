@@ -3,8 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../prisma/client';
 import { canManage } from '../../common/hierarchy';
 import { getPagination, paginate } from '../../common/utils';
-import type { UserRole } from '@prisma/client';
-import type { TaskStatus } from '@prisma/client';
+import type { UserRole, TaskStatus } from '../../common/types';
 
 const createSchema = z.object({
   title: z.string().min(1),
@@ -113,7 +112,7 @@ export async function getById(req: Request, res: Response): Promise<void> {
 
   const user = req.user!;
   if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
-    const isAssigned = task.assignments.some((a) => a.userId === user.id);
+    const isAssigned = task.assignments.some((a: { userId: string }) => a.userId === user.id);
     const inDomain = user.domainId && task.domainId === user.domainId;
     const inTeam = user.teamId && task.teamId === user.teamId;
     if (!isAssigned && !inDomain && !inTeam) {
@@ -293,7 +292,7 @@ export async function addUpdate(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const isAssigned = task.assignments.some((a) => a.userId === req.user!.id);
+    const isAssigned = task.assignments.some((a: { userId: string }) => a.userId === req.user!.id);
     if (!isAssigned && req.user!.role !== 'SUPER_ADMIN' && req.user!.role !== 'ADMIN') {
       res.status(403).json({ error: 'Only assigned users can add updates' });
       return;

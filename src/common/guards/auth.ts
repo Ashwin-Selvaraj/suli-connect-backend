@@ -1,8 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../../prisma/client';
+import * as tokenService from '../../modules/auth/services/token.service';
 import type { AuthUser } from '../types';
 
-// Extend Express Request
 declare global {
   namespace Express {
     interface Request {
@@ -12,9 +11,7 @@ declare global {
 }
 
 /**
- * Extract user from Authorization header (Bearer token or basic auth).
- * Stub implementation: expects "Bearer <userId>" for now.
- * Replace with JWT validation when auth is fully implemented.
+ * Extract and verify JWT access token from Authorization header.
  */
 export async function authGuard(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -25,29 +22,18 @@ export async function authGuard(req: Request, res: Response, next: NextFunction)
     }
 
     const token = authHeader.slice(7);
+    const payload = tokenService.verifyAccessToken(token);
 
-    // Stub: treat token as user ID for development
-    // TODO: Replace with JWT decode + verify
-    const user = await prisma.user.findUnique({
-      where: { id: token, isActive: true, deletedAt: null },
-      select: {
-        id: true,
-        phone: true,
-        role: true,
-        domainId: true,
-        teamId: true,
-        reportingManagerId: true,
-      },
-    });
-
-    if (!user) {
-      res.status(401).json({ error: 'Invalid or expired token' });
-      return;
-    }
-
-    req.user = user as AuthUser;
+    req.user = {
+      id: payload.sub,
+      phone: payload.phone ?? null,
+      role: payload.role,
+      domainId: payload.domainId ?? null,
+      teamId: payload.teamId ?? null,
+      reportingManagerId: payload.reportingManagerId ?? null,
+    };
     next();
   } catch (err) {
-    res.status(500).json({ error: 'Authentication failed' });
+    res.status(401).json({ error: 'Invalid or expired token' });
   }
 }

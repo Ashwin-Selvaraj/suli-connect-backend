@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import type { UserRole } from '@prisma/client';
+import type { UserRole } from '../types';
 
 /**
  * Require user to have one of the allowed roles.

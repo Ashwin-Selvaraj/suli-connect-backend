@@ -40,10 +40,13 @@ enum TaskStatus {
 
 model User {
   id                String    @id @default(cuid())
-  phone             String    @unique
+  phone             String?   @unique
+  email             String?   @unique
+  walletAddress     String?   @unique @map("wallet_address")
   name              String
+  avatarUrl         String?   @map("avatar_url")
   role              UserRole
-  passwordHash      String    @map("password_hash")
+  passwordHash      String?   @map("password_hash")
   isActive          Boolean   @default(true) @map("is_active")
   deletedAt         DateTime? @map("deleted_at") // Soft delete
 
@@ -76,10 +79,74 @@ model User {
   auditLogs         AuditLog[]
   notifications     Notification[]
 
+  // Auth: OAuth providers & sessions
+  providers         AuthProvider[]
+  sessions          AuthSession[]
+
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@map("users")
+}
+
+// ============================================================================
+// AUTH: Providers, Sessions, OTP, Wallet Nonce
+// ============================================================================
+
+model AuthProvider {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  provider     String   // 'google' | 'phone' | 'wallet'
+  providerId   String   @map("provider_id") // Google sub, phone, or wallet address
+  accessToken  String?  @map("access_token")
+  refreshToken String?  @map("refresh_token")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([provider, providerId])
+  @@map("auth_providers")
+}
+
+model AuthSession {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  refreshTokenHash String  @map("refresh_token_hash")
+  deviceInfo      String?  @map("device_info") // JSON
+  userAgent       String?  @map("user_agent")
+  ipAddress       String?  @map("ip_address")
+  expiresAt       DateTime @map("expires_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("auth_sessions")
+}
+
+model AuthOtp {
+  id        String   @id @default(cuid())
+  phone     String
+  hashedOtp String   @map("hashed_otp")
+  expiresAt DateTime @map("expires_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("auth_otps")
+}
+
+model AuthWalletNonce {
+  id        String   @id @default(cuid())
+  address   String
+  nonce     String
+  expiresAt DateTime @map("expires_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([address])
+  @@map("auth_wallet_nonces")
 }
 
 // ============================================================================

@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../../prisma/client';
 import { canManage } from '../../common/hierarchy';
 import { getPagination, paginate } from '../../common/utils';
-import type { UserRole } from '@prisma/client';
+import type { UserRole } from '../../common/types';
 
 const createSchema = z.object({
   phone: z.string().min(10),

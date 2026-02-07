@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma/client';
 import { getPagination, paginate } from '../../common/utils';
-import type { UserRole } from '@prisma/client';
+import type { UserRole } from '../../common/types';
 
 const overrideSchema = z.object({
   checkInAt: z.string().datetime().optional(),
