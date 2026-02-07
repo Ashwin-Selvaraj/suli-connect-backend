@@ -1,6 +1,6 @@
 import { prisma } from '../../../prisma/client';
 import type { UserRole } from '../../../common/types';
-import type { AuthUserPayload } from './auth.service';
+import type { AuthUserPayload } from '../dtos/auth-response.dto';
 import type { ProfileSetupDto } from '../dtos/profile-setup.dto';
 import type { UpdateProfileDto } from '../dtos/update-profile.dto';
 

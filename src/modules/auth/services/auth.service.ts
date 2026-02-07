@@ -5,19 +5,9 @@ import * as tokenService from './token.service';
 import * as sessionService from './session.service';
 import * as profileService from './profile.service';
 import * as phoneOtpService from '../strategies/phone-otp.service';
-import type { AuthResponse, AuthUserResponse } from '../dtos/auth-response.dto';
+import type { AuthResponse, AuthUserResponse, AuthUserPayload } from '../dtos/auth-response.dto';
 
-/** User payload for JWT and API responses */
-export interface AuthUserPayload {
-  sub: string;
-  phone?: string | null;
-  email?: string | null;
-  walletAddress?: string | null;
-  role: UserRole;
-  domainId?: string | null;
-  teamId?: string | null;
-  reportingManagerId?: string | null;
-}
+export type { AuthUserPayload };
 
 /** Build AuthResponse { token, user } */
 export function buildAuthResponse(

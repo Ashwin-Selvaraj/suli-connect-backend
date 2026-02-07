@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { authConfig } from '../config';
-import type { AuthUserPayload } from './auth.service';
+import type { AuthUserPayload } from '../dtos/auth-response.dto';
 
 export interface TokenPayload {
   sub: string; // userId

@@ -1,6 +1,6 @@
 import { Request } from 'express';
 import * as tokenService from '../services/token.service';
-import type { AuthUserPayload } from '../services/auth.service';
+import type { AuthUserPayload } from '../dtos/auth-response.dto';
 
 /** Extract and verify access token from Authorization header */
 export function verifyAccessToken(req: Request): AuthUserPayload | null {
