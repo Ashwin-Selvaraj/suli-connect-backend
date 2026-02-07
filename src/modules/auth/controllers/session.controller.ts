@@ -3,18 +3,17 @@ import * as sessionService from '../services/session.service';
 import { clearRefreshTokenCookie, clearAccessTokenCookie, getRefreshTokenFromRequest } from '../services/cookie.service';
 import { verifyAccessToken } from '../strategies/jwt.strategy';
 
-/** POST /api/auth/logout - Read refresh token from cookie, revoke session, clear cookies */
+/** POST /api/auth/logout - Clear cookies immediately, revoke session in background */
 export async function logout(req: Request, res: Response): Promise<void> {
   const refreshToken = getRefreshTokenFromRequest(req);
   if (refreshToken) {
-    try {
-      const validated = await sessionService.validateRefreshToken(refreshToken);
-      if (validated) {
-        await sessionService.revokeSession(validated.sessionId);
-      }
-    } catch {
-      // Token invalid or expired - still clear cookies
-    }
+    // Revoke session in background - don't await (respond fast)
+    sessionService
+      .validateRefreshToken(refreshToken)
+      .then((validated) => {
+        if (validated) return sessionService.revokeSession(validated.sessionId);
+      })
+      .catch(() => {});
   }
   clearRefreshTokenCookie(res);
   clearAccessTokenCookie(res);

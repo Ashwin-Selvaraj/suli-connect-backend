@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../../prisma/client';
 import { canVerify } from '../../common/hierarchy';
 
+type AssignmentLike = { userId: string; isValidator: boolean };
+
 const verifySchema = z.object({
   approved: z.boolean(),
   comment: z.string().optional(),
@@ -29,7 +31,7 @@ export async function verify(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const assignment = task.assignments.find((a) => a.userId === validatorId);
+    const assignment = task.assignments.find((a: AssignmentLike) => a.userId === validatorId);
     const isValidator = assignment?.isValidator ?? false;
 
     if (!isValidator && req.user!.role !== 'SUPER_ADMIN' && req.user!.role !== 'ADMIN') {
@@ -37,8 +39,8 @@ export async function verify(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const assignees = task.assignments.filter((a) => !a.isValidator);
-    if (assignees.some((a) => a.userId === validatorId)) {
+    const assignees = task.assignments.filter((a: AssignmentLike) => !a.isValidator);
+    if (assignees.some((a: AssignmentLike) => a.userId === validatorId)) {
       res.status(403).json({ error: 'Cannot verify your own task' });
       return;
     }
@@ -92,7 +94,10 @@ export async function verify(req: Request, res: Response): Promise<void> {
         }),
         prisma.user.update({
           where: { id: assignees[0].userId },
-          data: { reputationScore: { increment: REPUTATION_DELTA } },
+          data: {
+            reputationScore: { increment: REPUTATION_DELTA },
+            tasksCompletedCount: { increment: 1 },
+          },
         }),
       ]);
     }
@@ -122,7 +127,7 @@ export async function adminOverride(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const assignees = task.assignments.filter((a) => !a.isValidator);
+    const assignees = task.assignments.filter((a: AssignmentLike) => !a.isValidator);
     const assigneeId = assignees[0]?.userId ?? req.user!.id;
     const newStatus = body.approved ? 'VERIFIED' : 'REJECTED';
 
@@ -170,7 +175,10 @@ export async function adminOverride(req: Request, res: Response): Promise<void> 
         }),
         prisma.user.update({
           where: { id: assignees[0].userId },
-          data: { reputationScore: { increment: REPUTATION_DELTA } },
+          data: {
+            reputationScore: { increment: REPUTATION_DELTA },
+            tasksCompletedCount: { increment: 1 },
+          },
         }),
       ]);
     }

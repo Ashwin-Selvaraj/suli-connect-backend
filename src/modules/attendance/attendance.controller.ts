@@ -123,6 +123,14 @@ export async function checkIn(req: Request, res: Response): Promise<void> {
     update: { checkInAt: new Date() },
   });
 
+  // Increment daysWorkedCount only when we created a new day (first check-in)
+  if (!existing) {
+    await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { daysWorkedCount: { increment: 1 } },
+    });
+  }
+
   res.status(201).json(attendance);
 }
 

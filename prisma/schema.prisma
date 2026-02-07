@@ -92,6 +92,10 @@ model User {
   reputationScore   Int       @default(0) @map("reputation_score")
   reputationLogs    ReputationLog[]
 
+  // Stats (denormalized for fast /me)
+  tasksCompletedCount Int     @default(0) @map("tasks_completed_count")
+  daysWorkedCount     Int     @default(0) @map("days_worked_count")
+
   // Audit & notifications
   auditLogs         AuditLog[]
   notifications     Notification[]

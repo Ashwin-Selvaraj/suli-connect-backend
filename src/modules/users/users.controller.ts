@@ -29,6 +29,7 @@ export async function me(req: Request, res: Response): Promise<void> {
     return;
   }
   const userId = req.user.id;
+
   const user = await prisma.user.findUnique({
     where: { id: userId, deletedAt: null },
     select: {
@@ -44,19 +45,17 @@ export async function me(req: Request, res: Response): Promise<void> {
       isActive: true,
       onboardingCompleted: true,
       reputationScore: true,
+      tasksCompletedCount: true,
+      daysWorkedCount: true,
       team: { select: { name: true } },
       reportingManager: { select: { name: true } },
     },
   });
+
   if (!user) {
     res.status(404).json({ error: 'User not found' });
     return;
   }
-
-  const [tasksCompleted, daysWorked] = await Promise.all([
-    prisma.taskVerification.count({ where: { assigneeId: userId, approved: true } }),
-    prisma.attendance.count({ where: { userId } }),
-  ]);
 
   const userName =
     user.email?.split('@')[0] ||
@@ -83,8 +82,8 @@ export async function me(req: Request, res: Response): Promise<void> {
       onboardingComplete: user.onboardingCompleted,
       isProfileComplete,
       contributionScore: user.reputationScore ?? 0,
-      tasksCompleted,
-      daysWorked,
+      tasksCompleted: user.tasksCompletedCount ?? 0,
+      daysWorked: user.daysWorkedCount ?? 0,
       team: user.team?.name ?? null,
       reportingTo: user.reportingManager?.name ?? null,
     },
