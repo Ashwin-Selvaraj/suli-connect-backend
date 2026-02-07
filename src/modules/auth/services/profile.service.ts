@@ -11,6 +11,7 @@ export async function createUserFromPhone(phone: string) {
       phone,
       name: `User ${phone.slice(-4)}`,
       role: 'WORKER',
+      authProvider: 'phone',
     },
   });
 }
@@ -23,6 +24,7 @@ export async function createUserFromGoogle(googleId: string, email: string | nul
       name: name || 'User',
       avatarUrl,
       role: 'WORKER',
+      authProvider: 'google',
     },
   });
   await prisma.authProvider.create({
@@ -38,6 +40,7 @@ export async function createUserFromWallet(address: string) {
       walletAddress: address.toLowerCase(),
       name: `Wallet ${address.slice(0, 6)}...${address.slice(-4)}`,
       role: 'WORKER',
+      authProvider: 'wallet',
     },
   });
   await prisma.authProvider.create({

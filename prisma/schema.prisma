@@ -34,6 +34,15 @@ enum TaskStatus {
   REJECTED
 }
 
+// Onboarding purpose: Creator, Developer, Investor, Gamer, Other
+enum OnboardingPurpose {
+  Creator
+  Developer
+  Investor
+  Gamer
+  Other
+}
+
 // ============================================================================
 // USERS & HIERARCHY
 // ============================================================================
@@ -42,12 +51,20 @@ model User {
   id                String    @id @default(cuid())
   phone             String?   @unique
   email             String?   @unique
+  username          String?   @unique
   walletAddress     String?   @unique @map("wallet_address")
   name              String
+  fullName          String?   @map("full_name")
   avatarUrl         String?   @map("avatar_url")
+  profileImageUrl   String?   @map("profile_image_url")
+  bio               String?
   role              UserRole
+  purpose           OnboardingPurpose? // Creator, Developer, Investor, Gamer, Other
   passwordHash      String?   @map("password_hash")
   isActive          Boolean   @default(true) @map("is_active")
+  onboardingCompleted Boolean @default(false) @map("onboarding_completed")
+  authProvider      String?   @map("auth_provider") // google, email, wallet
+  lastLoginAt       DateTime? @map("last_login_at")
   deletedAt         DateTime? @map("deleted_at") // Soft delete
 
   // Hierarchy
@@ -83,10 +100,27 @@ model User {
   providers         AuthProvider[]
   sessions          AuthSession[]
 
+  // Onboarding - full multi-step payload (JSON)
+  onboardingData    Json?     @map("onboarding_data")
+
+  // Onboarding (legacy - kept for backward compat)
+  onboardingProfile OnboardingProfile?
+
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@map("users")
+}
+
+model OnboardingProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique @map("user_id")
+  data      Json     // Full onboarding payload
+  completedAt DateTime @default(now()) @map("completed_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("onboarding_profiles")
 }
 
 // ============================================================================

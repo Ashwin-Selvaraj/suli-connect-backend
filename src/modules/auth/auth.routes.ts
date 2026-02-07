@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as authMainController from './controllers/auth-main.controller';
+import * as signInController from './controllers/sign-in.controller';
 import * as webappAuthController from './controllers/webapp-auth.controller';
 import * as webappLinkController from './controllers/webapp-link.controller';
 import * as sessionController from './controllers/session.controller';
@@ -18,8 +19,11 @@ router.get('/webapp/auth', webappAuthController.startOAuth);
 router.get('/webapp/auth/google/callback', webappLinkController.googleCallback);
 
 // ============================================================================
-// AUTH MAIN (phone, wallet, Google code exchange, refresh)
+// AUTH MAIN (sign-in, phone, wallet, Google code exchange, refresh)
 // ============================================================================
+
+// POST /api/auth/sign-in - Return current user from session (cookie or Bearer)
+router.post('/sign-in', signInController.signIn);
 
 // POST /api/auth/login - Phone + password (legacy)
 router.post('/login', authMainController.login);

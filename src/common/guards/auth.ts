@@ -1,27 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
 import * as tokenService from '../../modules/auth/services/token.service';
+import { getAccessTokenFromRequest } from '../../modules/auth/services/cookie.service';
 import type { AuthUser } from '../types';
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: AuthUser;
-    }
-  }
-}
-
 /**
- * Extract and verify JWT access token from Authorization header.
+ * Extract and verify JWT access token from cookie or Authorization header.
  */
 export async function authGuard(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Missing or invalid authorization' });
+    const token = getAccessTokenFromRequest(req);
+    if (!token) {
+      res.status(401).json({
+        statusCode: 401,
+        message: 'Unauthorized. Send access_token cookie (with credentials: "include") or Authorization: Bearer <token>.',
+      });
       return;
     }
 
-    const token = authHeader.slice(7);
     const payload = tokenService.verifyAccessToken(token);
 
     req.user = {
@@ -34,6 +29,6 @@ export async function authGuard(req: Request, res: Response, next: NextFunction)
     };
     next();
   } catch (err) {
-    res.status(401).json({ error: 'Invalid or expired token' });
+    res.status(401).json({ statusCode: 401, message: 'Invalid or expired token' });
   }
 }
