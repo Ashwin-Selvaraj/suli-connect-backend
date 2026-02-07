@@ -1,27 +1,24 @@
 import { Request, Response } from 'express';
-import { z } from 'zod';
 import * as sessionService from '../services/session.service';
-import { clearRefreshTokenCookie } from '../services/cookie.service';
+import { clearRefreshTokenCookie, clearAccessTokenCookie, getRefreshTokenFromRequest } from '../services/cookie.service';
 import { verifyAccessToken } from '../strategies/jwt.strategy';
-import { refreshTokenSchema } from '../dtos/refresh-token.dto';
 
-/** POST /auth/logout */
+/** POST /api/auth/logout - Read refresh token from cookie, revoke session, clear cookies */
 export async function logout(req: Request, res: Response): Promise<void> {
-  try {
-    const body = refreshTokenSchema.parse(req.body);
-    const validated = await sessionService.validateRefreshToken(body.refreshToken);
-    if (validated) {
-      await sessionService.revokeSession(validated.sessionId);
+  const refreshToken = getRefreshTokenFromRequest(req);
+  if (refreshToken) {
+    try {
+      const validated = await sessionService.validateRefreshToken(refreshToken);
+      if (validated) {
+        await sessionService.revokeSession(validated.sessionId);
+      }
+    } catch {
+      // Token invalid or expired - still clear cookies
     }
-    clearRefreshTokenCookie(res);
-    res.json({ message: 'Logged out' });
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      res.status(400).json({ error: 'Invalid input', details: err.errors });
-      return;
-    }
-    res.status(500).json({ error: 'Logout failed' });
   }
+  clearRefreshTokenCookie(res);
+  clearAccessTokenCookie(res);
+  res.json({ message: 'Logged out' });
 }
 
 /** GET /auth/sessions - List sessions */
@@ -33,7 +30,7 @@ export async function listSessions(req: Request, res: Response): Promise<void> {
   }
 
   const sessions = await sessionService.listSessions(payload.sub);
-  res.json(sessions.map((s) => ({
+  res.json(sessions.map((s: { id: string; userAgent: string | null; ipAddress: string | null; createdAt: Date; expiresAt: Date }) => ({
     id: s.id,
     userAgent: s.userAgent,
     ipAddress: s.ipAddress,

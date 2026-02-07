@@ -12,6 +12,11 @@ export function setAccessTokenCookie(res: Response, accessToken: string): void {
   });
 }
 
+/** Read refresh token from cookie */
+export function getRefreshTokenFromRequest(req: Request): string | null {
+  return req.cookies?.[authConfig.cookie.refreshTokenName] ?? null;
+}
+
 /** Read access token from cookie or Authorization header */
 export function getAccessTokenFromRequest(req: Request): string | null {
   const fromCookie = req.cookies?.[authConfig.cookie.accessTokenName];
