@@ -1,10 +1,7 @@
 import { Router } from 'express';
 import * as reputationController from './reputation.controller';
-import { authGuard } from '../../common/guards/auth';
 
 const router = Router();
-
-router.use(authGuard);
 
 // GET /reputation/me - Current user's reputation
 router.get('/me', reputationController.me);

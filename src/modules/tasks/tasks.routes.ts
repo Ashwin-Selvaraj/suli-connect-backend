@@ -1,11 +1,8 @@
 import { Router } from 'express';
 import * as tasksController from './tasks.controller';
-import { authGuard } from '../../common/guards/auth';
 import { requireRoles } from '../../common/guards/roles';
 
 const router = Router();
-
-router.use(authGuard);
 
 // GET /tasks - List tasks
 router.get('/', tasksController.list);

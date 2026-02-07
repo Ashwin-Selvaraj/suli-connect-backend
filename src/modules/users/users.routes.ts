@@ -1,14 +1,10 @@
 import { Router } from 'express';
 import * as usersController from './users.controller';
-import { authGuard } from '../../common/guards/auth';
 import { requireRoles, requireAdmin } from '../../common/guards/roles';
 
 const router = Router();
 
-// All routes require auth
-router.use(authGuard);
-
-// GET /users - List users (filtered by hierarchy)
+// GET /users (protected by global auth) - List users (filtered by hierarchy)
 router.get('/', usersController.list);
 
 // GET /users/me - Current user profile

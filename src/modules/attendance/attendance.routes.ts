@@ -1,11 +1,8 @@
 import { Router } from 'express';
 import * as attendanceController from './attendance.controller';
-import { authGuard } from '../../common/guards/auth';
-import { requireRoles, requireAdmin } from '../../common/guards/roles';
+import { requireAdmin } from '../../common/guards/roles';
 
 const router = Router();
-
-router.use(authGuard);
 
 // GET /attendance - List attendance (filtered by user/date range)
 router.get('/', attendanceController.list);

@@ -1,11 +1,8 @@
 import { Router } from 'express';
 import * as teamsController from './teams.controller';
-import { authGuard } from '../../common/guards/auth';
 import { requireRoles } from '../../common/guards/roles';
 
 const router = Router();
-
-router.use(authGuard);
 
 // GET /teams - List teams (optionally by domainId)
 router.get('/', teamsController.list);

@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 
 import { authConfig } from './modules/auth/config';
+import { globalAuthMiddleware } from './common/guards/global-auth.middleware';
 import authRoutes from './modules/auth/auth.routes';
 import * as webappAuthController from './modules/auth/controllers/webapp-auth.controller';
 import * as webappLinkController from './modules/auth/controllers/webapp-link.controller';
@@ -37,6 +38,9 @@ app.use(
 );
 app.use(cookieParser());
 app.use(express.json());
+
+// Global auth - protects all /api/* routes except public (sign-in, OAuth, OTP, wallet, etc.)
+app.use(globalAuthMiddleware);
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });

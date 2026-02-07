@@ -1,11 +1,8 @@
 import { Router } from 'express';
 import * as domainsController from './domains.controller';
-import { authGuard } from '../../common/guards/auth';
 import { requireRoles } from '../../common/guards/roles';
 
 const router = Router();
-
-router.use(authGuard);
 
 // GET /domains - List domains
 router.get('/', domainsController.list);

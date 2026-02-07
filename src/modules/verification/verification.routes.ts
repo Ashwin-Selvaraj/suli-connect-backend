@@ -1,11 +1,8 @@
 import { Router } from 'express';
 import * as verificationController from './verification.controller';
-import { authGuard } from '../../common/guards/auth';
 import { requireAdmin } from '../../common/guards/roles';
 
 const router = Router();
-
-router.use(authGuard);
 
 // POST /verification/:taskId - Verify or reject task
 router.post('/:taskId', verificationController.verify);
