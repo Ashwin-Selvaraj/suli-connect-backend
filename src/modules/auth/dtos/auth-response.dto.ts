@@ -1,4 +1,7 @@
 import type { UserRole } from '../../../common/types';
+import type { AuthUserResponse } from '../services/auth-user-response.service';
+
+export type { AuthUserResponse };
 
 /** JWT payload shape - used by token service and profile service */
 export interface AuthUserPayload {
@@ -21,18 +24,4 @@ export interface AuthResponse {
     refreshToken: string;
   };
   user: AuthUserResponse;
-}
-
-export interface AuthUserResponse {
-  id: string;
-  phone?: string | null;
-  email?: string | null;
-  walletAddress?: string | null;
-  name: string;
-  avatarUrl?: string | null;
-  role: string;
-  domainId?: string | null;
-  teamId?: string | null;
-  reportingManagerId?: string | null;
-  reputationScore?: number;
 }

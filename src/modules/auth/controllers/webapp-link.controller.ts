@@ -29,7 +29,7 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
 
     setRefreshTokenCookie(res, refreshToken);
     setAccessTokenCookie(res, accessToken);
-    const result = buildAuthResponse(user, accessToken, refreshToken);
+    const result = await buildAuthResponse(user, accessToken, refreshToken);
 
     const redirectUrl = new URL(`${frontendUrl}/auth/success`);
     redirectUrl.searchParams.set('accessToken', accessToken);

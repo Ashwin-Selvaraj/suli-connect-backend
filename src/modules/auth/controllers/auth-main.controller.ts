@@ -105,7 +105,7 @@ export async function walletVerify(req: Request, res: Response): Promise<void> {
     const refreshToken = tokenService.generateRefreshToken(user.id);
     await sessionService.createSession(user.id, refreshToken, deviceInfo);
 
-    const result = authService.buildAuthResponse(user, accessToken, refreshToken);
+    const result = await authService.buildAuthResponse(user, accessToken, refreshToken);
     res.json(result);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -126,7 +126,7 @@ export async function googleCodeExchange(req: Request, res: Response): Promise<v
       { type: 'login' },
       deviceInfo
     );
-    const result = authService.buildAuthResponse(authUser, accessToken, refreshToken);
+    const result = await authService.buildAuthResponse(authUser, accessToken, refreshToken);
     res.json(result);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -160,7 +160,7 @@ export async function refresh(req: Request, res: Response): Promise<void> {
     await sessionService.revokeSession(validated.sessionId);
     await sessionService.createSession(user.id, refreshToken, getDeviceInfo(req));
 
-    const result = authService.buildAuthResponse(user, accessToken, refreshToken);
+    const result = await authService.buildAuthResponse(user, accessToken, refreshToken);
     res.json(result);
   } catch (err) {
     if (err instanceof z.ZodError) {

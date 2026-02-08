@@ -3,34 +3,47 @@ import bcrypt from 'bcryptjs';
 import type { UserRole } from '../../../common/types';
 import * as tokenService from './token.service';
 import * as sessionService from './session.service';
-import * as profileService from './profile.service';
+import { createUserFromPhone, toAuthPayload } from '../services/profile.service';
 import * as phoneOtpService from '../strategies/phone-otp.service';
-import type { AuthResponse, AuthUserResponse, AuthUserPayload } from '../dtos/auth-response.dto';
+import { toAuthUserResponse } from './auth-user-response.service';
+import type { AuthResponse, AuthUserPayload } from '../dtos/auth-response.dto';
 
 export type { AuthUserPayload };
 
+const fullUserSelect = {
+  id: true,
+  phone: true,
+  email: true,
+  name: true,
+  fullName: true,
+  username: true,
+  avatarUrl: true,
+  profileImageUrl: true,
+  role: true,
+  isActive: true,
+  onboardingCompleted: true,
+  reputationScore: true,
+  tasksCompletedCount: true,
+  daysWorkedCount: true,
+  team: { select: { name: true } },
+  reportingManager: { select: { name: true } },
+} as const;
+
 /** Build AuthResponse { token, user } */
-export function buildAuthResponse(
-  user: { id: string; phone?: string | null; email?: string | null; walletAddress?: string | null; name: string; avatarUrl?: string | null; role: UserRole; domainId?: string | null; teamId?: string | null; reportingManagerId?: string | null; reputationScore?: number },
+export async function buildAuthResponse(
+  user: { id: string },
   accessToken: string,
   refreshToken: string
-): AuthResponse {
-  const authUser: AuthUserResponse = {
-    id: user.id,
-    phone: user.phone,
-    email: user.email,
-    walletAddress: user.walletAddress,
-    name: user.name,
-    avatarUrl: user.avatarUrl,
-    role: user.role,
-    domainId: user.domainId,
-    teamId: user.teamId,
-    reportingManagerId: user.reportingManagerId,
-    reputationScore: user.reputationScore ?? 0,
-  };
+): Promise<AuthResponse> {
+  const fullUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: fullUserSelect,
+  });
+  if (!fullUser) throw new Error('User not found');
+
   return {
     token: { accessToken, refreshToken },
-    user: authUser,
+    user: toAuthUserResponse(fullUser, { refreshToken }),
   };
 }
 
@@ -63,7 +76,7 @@ export async function loginWithPassword(
   const refreshToken = tokenService.generateRefreshToken(user.id);
   await sessionService.createSession(user.id, refreshToken, deviceInfo);
 
-  return buildAuthResponse(user, accessToken, refreshToken);
+  return await buildAuthResponse(user, accessToken, refreshToken);
 }
 
 /** OTP request - generate and store OTP (pluggable send) */
@@ -86,14 +99,14 @@ export async function verifyOtp(
 
   let user = await prisma.user.findFirst({ where: { phone } });
   if (!user) {
-    user = await profileService.createUserFromPhone(phone);
+    user = await createUserFromPhone(phone);
   }
   if (!user.isActive || user.deletedAt) throw new Error('Account disabled');
 
-  const payload = profileService.toAuthPayload(user);
+  const payload = toAuthPayload(user);
   const accessToken = tokenService.generateAccessToken(payload);
   const refreshToken = tokenService.generateRefreshToken(user.id);
   await sessionService.createSession(user.id, refreshToken, deviceInfo);
 
-  return buildAuthResponse(user, accessToken, refreshToken);
+  return await buildAuthResponse(user, accessToken, refreshToken);
 }
