@@ -84,10 +84,27 @@ async function main() {
     data: { leadId: domainHead.id },
   });
 
+  // SULI Location (PrismaClient.suliLocation exists after `npx prisma generate`; IDE may cache older types)
+  const suliLocation = (prisma as any).suliLocation;
+  let suliVillage = suliLocation ? await suliLocation.findFirst({ where: { name: 'SULI Village Center' } }) : null;
+  if (suliLocation && !suliVillage) {
+    suliVillage = await suliLocation.create({
+      data: {
+        name: 'SULI Village Center',
+        latitude: 15.5,
+        longitude: 73.8,
+        radiusMetres: 500,
+      },
+    });
+  }
+
   console.log('Seed completed:');
   console.log('  Admin:', admin.phone, admin.name);
   console.log('  Domains:', agriculture.name, cattle.name, infrastructure.name);
   console.log('  Team:', agTeam.name);
+  if (suliVillage) {
+    console.log('  SULI Location:', suliVillage.name, '(500m radius)');
+  }
   console.log('\nLogin: phone=+919876543210, password=admin123');
 }
 

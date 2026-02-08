@@ -3,12 +3,77 @@ import { z } from 'zod';
 import { prisma } from '../../prisma/client';
 import { getPagination, paginate } from '../../common/utils';
 import type { UserRole } from '../../common/types';
+import * as attendanceService from './attendance.service';
+
+const eventPayloadSchema = z
+  .object({
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+    accuracy: z.number().optional(),
+    locationId: z.string().optional(),
+    taskId: z.string().optional(),
+    deviceType: z.enum(['MOBILE', 'DESKTOP']).optional(),
+  })
+  .refine((d) => (d.latitude == null) === (d.longitude == null), {
+    message: 'latitude and longitude must be provided together',
+  });
 
 const overrideSchema = z.object({
   checkInAt: z.string().datetime().optional(),
   checkOutAt: z.string().datetime().optional(),
   reason: z.string().min(1),
 });
+
+function formatHoursWorked(checkInAt: Date, checkOutAt: Date): string {
+  const ms = checkOutAt.getTime() - checkInAt.getTime();
+  const totalMins = Math.floor(ms / 60_000);
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+function formatSummary(summary: {
+  id: string;
+  date: Date;
+  firstCheckIn: Date | null;
+  lastCheckOut: Date | null;
+  totalWorkMinutes: number;
+  totalBreakMinutes: number;
+  sessionsCount: number;
+  status: string;
+}) {
+  return {
+    id: summary.id,
+    date: summary.date,
+    firstCheckIn: summary.firstCheckIn,
+    lastCheckOut: summary.lastCheckOut,
+    totalWorkMinutes: summary.totalWorkMinutes,
+    totalBreakMinutes: summary.totalBreakMinutes,
+    sessionsCount: summary.sessionsCount,
+    status: summary.status,
+  };
+}
+
+/** GET /attendance/daily-summary?date=YYYY-MM-DD */
+export async function dailySummary(req: Request, res: Response): Promise<void> {
+  try {
+    const dateStr = (req.query.date as string) || new Date().toISOString().slice(0, 10);
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) {
+      res.status(400).json({ error: 'Invalid date' });
+      return;
+    }
+    const userId = req.user!.id;
+
+    const summary = await attendanceService.getDailySummary(userId, date);
+
+    res.json({ summary: formatSummary(summary) });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get daily summary' });
+  }
+}
 
 export async function me(req: Request, res: Response): Promise<void> {
   const dateStr = req.query.date as string;
@@ -25,6 +90,47 @@ export async function me(req: Request, res: Response): Promise<void> {
   });
 
   res.json(attendance ?? { date, checkInAt: null, checkOutAt: null });
+}
+
+/** GET /attendance/today - Enriched today's attendance for current user */
+export async function today(req: Request, res: Response): Promise<void> {
+  const userId = req.user!.id;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const attendance = await prisma.attendance.findUnique({
+    where: { userId_date: { userId, date: today } },
+    include: { suliLocation: { select: { id: true, name: true } } },
+  });
+
+  if (!attendance) {
+    res.json({ attendance: null });
+    return;
+  }
+
+  let hoursWorked: string | null = null;
+  if (attendance.checkInAt && attendance.checkOutAt) {
+    hoursWorked = formatHoursWorked(attendance.checkInAt, attendance.checkOutAt);
+  } else if (attendance.checkInAt) {
+    hoursWorked = formatHoursWorked(attendance.checkInAt, new Date());
+  }
+
+  res.json({
+    attendance: {
+      id: attendance.id,
+      checkInAt: attendance.checkInAt,
+      checkOutAt: attendance.checkOutAt,
+      latitude: attendance.latitude,
+      longitude: attendance.longitude,
+      hoursWorked,
+      allowanceAmount:
+        attendance.allowanceAmount != null ? Number(attendance.allowanceAmount) : null,
+      allowanceCurrency: attendance.allowanceCurrency,
+      allowanceType: attendance.allowanceType,
+      suliLocationId: attendance.suliLocationId,
+      suliLocationName: attendance.suliLocation?.name ?? null,
+    },
+  });
 }
 
 export async function list(req: Request, res: Response): Promise<void> {
@@ -96,71 +202,76 @@ export async function list(req: Request, res: Response): Promise<void> {
   res.json(paginate(records, total, { page, limit }));
 }
 
+/** POST /attendance/check-in – Append-only; always inserts new event */
 export async function checkIn(req: Request, res: Response): Promise<void> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  try {
+    const body = eventPayloadSchema.parse(req.body ?? {});
+    const userId = req.user!.id;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-  const existing = await prisma.attendance.findUnique({
-    where: {
-      userId_date: { userId: req.user!.id, date: today },
-    },
-  });
-
-  if (existing?.checkInAt) {
-    res.status(400).json({ error: 'Already checked in today' });
-    return;
-  }
-
-  const attendance = await prisma.attendance.upsert({
-    where: {
-      userId_date: { userId: req.user!.id, date: today },
-    },
-    create: {
-      userId: req.user!.id,
-      date: today,
-      checkInAt: new Date(),
-    },
-    update: { checkInAt: new Date() },
-  });
-
-  // Increment daysWorkedCount only when we created a new day (first check-in)
-  if (!existing) {
-    await prisma.user.update({
-      where: { id: req.user!.id },
-      data: { daysWorkedCount: { increment: 1 } },
+    const event = await attendanceService.insertCheckInEvent(userId, {
+      latitude: body.latitude,
+      longitude: body.longitude,
+      accuracy: body.accuracy,
+      locationId: body.locationId,
+      taskId: body.taskId,
+      deviceType: body.deviceType as 'MOBILE' | 'DESKTOP' | undefined,
     });
-  }
 
-  res.status(201).json(attendance);
+    const summary = await attendanceService.computeAndStoreDailySummary(userId, today);
+
+    res.status(201).json({
+      event: {
+        id: event.id,
+        eventType: event.eventType,
+        timestamp: event.timestamp,
+      },
+      summary: formatSummary(summary),
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Invalid input', details: err.errors });
+      return;
+    }
+    res.status(500).json({ error: 'Check-in failed' });
+  }
 }
 
+/** POST /attendance/check-out – Append-only; always inserts new event */
 export async function checkOut(req: Request, res: Response): Promise<void> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  try {
+    const body = eventPayloadSchema.parse(req.body ?? {});
+    const userId = req.user!.id;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-  const existing = await prisma.attendance.findUnique({
-    where: {
-      userId_date: { userId: req.user!.id, date: today },
-    },
-  });
+    const event = await attendanceService.insertCheckOutEvent(userId, {
+      latitude: body.latitude,
+      longitude: body.longitude,
+      accuracy: body.accuracy,
+      locationId: body.locationId,
+      taskId: body.taskId,
+      deviceType: body.deviceType as 'MOBILE' | 'DESKTOP' | undefined,
+    });
 
-  if (!existing) {
-    res.status(400).json({ error: 'No check-in found for today' });
-    return;
+    const summary = await attendanceService.computeAndStoreDailySummary(userId, today);
+
+    res.json({
+      event: {
+        id: event.id,
+        eventType: event.eventType,
+        timestamp: event.timestamp,
+      },
+      summary: formatSummary(summary),
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Invalid input', details: err.errors });
+      return;
+    }
+    res.status(500).json({ error: 'Check-out failed' });
   }
-  if (existing.checkOutAt) {
-    res.status(400).json({ error: 'Already checked out today' });
-    return;
-  }
-
-  const attendance = await prisma.attendance.update({
-    where: {
-      userId_date: { userId: req.user!.id, date: today },
-    },
-    data: { checkOutAt: new Date() },
-  });
-
-  res.json(attendance);
 }
 
 export async function override(req: Request, res: Response): Promise<void> {

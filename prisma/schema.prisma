@@ -43,6 +43,23 @@ enum OnboardingPurpose {
   Other
 }
 
+enum AttendanceEventType {
+  CHECK_IN
+  CHECK_OUT
+}
+
+enum DeviceType {
+  MOBILE
+  DESKTOP
+}
+
+enum DailySummaryStatus {
+  PRESENT
+  PARTIAL
+  ABSENT
+  NEEDS_VERIFICATION
+}
+
 // ============================================================================
 // USERS & HIERARCHY
 // ============================================================================
@@ -86,7 +103,9 @@ model User {
   tasksVerified     TaskVerification[]  @relation("AssigneeVerifications")
 
   // Attendance
-  attendances       Attendance[]
+  attendances             Attendance[]
+  attendanceEvents        AttendanceEvent[]
+  attendanceDailySummaries AttendanceDailySummary[]
 
   // Reputation (derived, stored for performance)
   reputationScore   Int       @default(0) @map("reputation_score")
@@ -229,6 +248,27 @@ model Team {
 }
 
 // ============================================================================
+// SULI LOCATIONS (geofencing for check-in/check-out)
+// ============================================================================
+
+model SuliLocation {
+  id             String   @id @default(cuid())
+  name           String   // e.g. "SULI Village Center"
+  latitude       Float    @map("latitude")
+  longitude      Float    @map("longitude")
+  radiusMetres   Float    @map("radius_metres") // Geofence radius
+  isActive       Boolean  @default(true) @map("is_active")
+
+  attendances      Attendance[]
+  attendanceEvents AttendanceEvent[]
+
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("suli_locations")
+}
+
+// ============================================================================
 // ATTENDANCE
 // ============================================================================
 
@@ -239,8 +279,29 @@ model Attendance {
   checkInAt    DateTime? @map("check_in_at")
   checkOutAt   DateTime? @map("check_out_at")
   isOverridden Boolean   @default(false) @map("is_overridden")
-  overrideBy   String?   @map("override_by") // Admin user ID who overrode
+  overrideBy   String?   @map("override_by")
   overrideReason String? @map("override_reason")
+
+  // Check-in location
+  latitude     Float?    @map("latitude")
+  longitude    Float?    @map("longitude")
+  accuracy     Float?    @map("accuracy") // metres
+  note         String?   @map("note")
+
+  // Check-out location
+  checkoutLatitude   Float?    @map("checkout_latitude")
+  checkoutLongitude  Float?    @map("checkout_longitude")
+  checkoutAccuracy   Float?    @map("checkout_accuracy")
+  checkoutNote       String?   @map("checkout_note")
+
+  // SULI location used (geofence validated)
+  suliLocationId     String?   @map("suli_location_id")
+  suliLocation       SuliLocation? @relation(fields: [suliLocationId], references: [id])
+
+  // Allowance (populated on check-out or batch)
+  allowanceAmount    Decimal?  @map("allowance_amount") @db.Decimal(12, 2)
+  allowanceCurrency  String?   @map("allowance_currency") // e.g. "INR"
+  allowanceType      String?   @map("allowance_type") // e.g. "daily", "half_day"
 
   user         User      @relation(fields: [userId], references: [id])
 
@@ -249,6 +310,56 @@ model Attendance {
 
   @@unique([userId, date])
   @@map("attendance")
+}
+
+// ============================================================================
+// ATTENDANCE EVENTS (append-only, immutable)
+// ============================================================================
+
+model AttendanceEvent {
+  id          String              @id @default(cuid())
+  userId      String              @map("user_id")
+  eventType   AttendanceEventType @map("event_type")
+  timestamp   DateTime            @default(now()) @map("timestamp")
+  latitude    Decimal?            @map("latitude") @db.Decimal(10, 7)
+  longitude   Decimal?            @map("longitude") @db.Decimal(10, 7)
+  accuracy    Float?              @map("accuracy") // metres
+  locationId  String?             @map("location_id") // SULI location / work area
+  taskId      String?             @map("task_id")
+  deviceType  DeviceType          @default(MOBILE) @map("device_type")
+
+  user        User                @relation(fields: [userId], references: [id])
+  suliLocation SuliLocation?      @relation(fields: [locationId], references: [id])
+  task        Task?               @relation(fields: [taskId], references: [id])
+
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@map("attendance_events")
+}
+
+// ============================================================================
+// ATTENDANCE DAILY SUMMARY (computed from events)
+// ============================================================================
+
+model AttendanceDailySummary {
+  id                  String             @id @default(cuid())
+  userId              String             @map("user_id")
+  date                DateTime           @db.Date
+  firstCheckIn        DateTime?          @map("first_check_in")
+  lastCheckOut        DateTime?          @map("last_check_out")
+  totalWorkMinutes    Int                @default(0) @map("total_work_minutes")
+  totalBreakMinutes   Int                @default(0) @map("total_break_minutes")
+  sessionsCount       Int                @default(0) @map("sessions_count")
+  status              DailySummaryStatus @map("status")
+
+  user                User               @relation(fields: [userId], references: [id])
+
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  @@unique([userId, date])
+  @@map("attendance_daily_summary")
 }
 
 // ============================================================================
@@ -266,9 +377,10 @@ model Task {
   domain      Domain     @relation(fields: [domainId], references: [id])
   team        Team       @relation(fields: [teamId], references: [id])
 
-  assignments TaskAssignment[]
-  updates     TaskUpdate[]
-  verifications TaskVerification[]
+  assignments     TaskAssignment[]
+  updates         TaskUpdate[]
+  verifications   TaskVerification[]
+  attendanceEvents AttendanceEvent[]
 
   createdAt   DateTime   @default(now()) @map("created_at")
   updatedAt   DateTime   @updatedAt @map("updated_at")

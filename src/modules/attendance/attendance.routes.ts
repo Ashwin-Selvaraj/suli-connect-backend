@@ -10,7 +10,13 @@ router.get('/', attendanceController.list);
 // GET /attendance/me - Current user's attendance for date
 router.get('/me', attendanceController.me);
 
-// POST /attendance/check-in - Check in
+// GET /attendance/today - Enriched today's attendance (legacy, from Attendance table)
+router.get('/today', attendanceController.today);
+
+// GET /attendance/daily-summary?date=YYYY-MM-DD - Computed from events
+router.get('/daily-summary', attendanceController.dailySummary);
+
+// POST /attendance/check-in - Append-only event insert
 router.post('/check-in', attendanceController.checkIn);
 
 // POST /attendance/check-out - Check out
