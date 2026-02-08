@@ -20,6 +20,7 @@ export const PUBLIC_ROUTES: PublicRoute[] = [
   { method: 'POST', path: '/api/auth/wallet/verify' },
   { method: 'POST', path: '/api/auth/google' },
   { method: 'POST', path: '/api/auth/refresh' },
+  { method: 'POST', path: '/api/auth/logout' },
 ];
 
 export function isPublicRoute(method: string, path: string): boolean {

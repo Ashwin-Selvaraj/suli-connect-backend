@@ -2,19 +2,19 @@ import { Request, Response } from 'express';
 import { prisma } from '../../../prisma/client';
 import * as tokenService from '../services/token.service';
 import { getAccessTokenFromRequest } from '../services/cookie.service';
-import { toAuthUserResponse } from '../services/auth-user-response.service';
 
 /**
  * POST /api/auth/sign-in
- * Return current user from session (cookie or Bearer).
- * Used by frontend after OAuth redirects and on app load.
+ * Called only after OAuth redirect (?auth=success). Session is via cookies.
+ * Returns minimal user so frontend can decide redirect to onboarding or home.
+ * Full profile from GET /api/users/me.
  */
 export async function signIn(req: Request, res: Response): Promise<void> {
   const accessToken = getAccessTokenFromRequest(req);
 
   if (!accessToken) {
-    res.status(400).json({
-      statusCode: 400,
+    res.status(401).json({
+      statusCode: 401,
       message: 'No session found. Please sign in again.',
     });
     return;
@@ -24,8 +24,8 @@ export async function signIn(req: Request, res: Response): Promise<void> {
   try {
     payload = tokenService.verifyAccessToken(accessToken);
   } catch {
-    res.status(400).json({
-      statusCode: 400,
+    res.status(401).json({
+      statusCode: 401,
       message: 'Invalid or expired session. Please sign in again.',
     });
     return;
@@ -35,34 +35,40 @@ export async function signIn(req: Request, res: Response): Promise<void> {
     where: { id: payload.sub, deletedAt: null },
     select: {
       id: true,
-      phone: true,
-      email: true,
       name: true,
       fullName: true,
-      username: true,
+      email: true,
       avatarUrl: true,
       profileImageUrl: true,
       role: true,
-      isActive: true,
       onboardingCompleted: true,
-      reputationScore: true,
-      tasksCompletedCount: true,
-      daysWorkedCount: true,
-      team: { select: { name: true } },
-      reportingManager: { select: { name: true } },
     },
   });
 
   if (!user) {
-    res.status(400).json({
-      statusCode: 400,
+    res.status(401).json({
+      statusCode: 401,
       message: 'Invalid or expired session. Please sign in again.',
     });
     return;
   }
 
+  const isProfileComplete = !!(
+    user.name &&
+    user.name.length > 1 &&
+    !user.name.startsWith('User ') &&
+    !user.name.startsWith('Wallet ')
+  );
+
   res.json({
-    user: toAuthUserResponse(user),
-    accessToken,
+    user: {
+      id: user.id,
+      name: user.fullName ?? user.name ?? null,
+      email: user.email ?? null,
+      avatarUrl: user.avatarUrl ?? user.profileImageUrl ?? null,
+      role: user.role,
+      onboardingComplete: user.onboardingCompleted,
+      isProfileComplete,
+    },
   });
 }

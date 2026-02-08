@@ -3,9 +3,10 @@ import * as sessionService from '../services/session.service';
 import { clearRefreshTokenCookie, clearAccessTokenCookie, getRefreshTokenFromRequest } from '../services/cookie.service';
 import { verifyAccessToken } from '../strategies/jwt.strategy';
 
-/** POST /api/auth/logout - Clear cookies immediately, revoke session in background */
+/** POST /api/auth/logout - Accept empty body; clear session via cookie (or body refreshToken if provided) */
 export async function logout(req: Request, res: Response): Promise<void> {
-  const refreshToken = getRefreshTokenFromRequest(req);
+  const refreshToken =
+    getRefreshTokenFromRequest(req) ?? (req.body?.refreshToken as string | undefined);
   if (refreshToken) {
     // Revoke session in background - don't await (respond fast)
     sessionService

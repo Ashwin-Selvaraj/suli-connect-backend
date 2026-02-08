@@ -23,34 +23,67 @@ const updateSchema = createSchema.partial().extend({
   password: z.string().min(6).optional(),
 });
 
+function formatHoursWorked(checkInAt: Date, checkOutAt: Date | null): string {
+  const end = checkOutAt ?? new Date();
+  const ms = end.getTime() - checkInAt.getTime();
+  const totalMins = Math.floor(ms / 60_000);
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
 export async function me(req: Request, res: Response): Promise<void> {
   if (!req.user) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
   const userId = req.user.id;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId, deletedAt: null },
-    select: {
-      id: true,
-      phone: true,
-      email: true,
-      name: true,
-      fullName: true,
-      username: true,
-      avatarUrl: true,
-      profileImageUrl: true,
-      role: true,
-      isActive: true,
-      onboardingCompleted: true,
-      reputationScore: true,
-      tasksCompletedCount: true,
-      daysWorkedCount: true,
-      team: { select: { name: true } },
-      reportingManager: { select: { name: true } },
-    },
-  });
+  const [user, todayAttendance, currentTask, notificationsCount] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+      select: {
+        id: true,
+        phone: true,
+        email: true,
+        name: true,
+        fullName: true,
+        username: true,
+        avatarUrl: true,
+        profileImageUrl: true,
+        role: true,
+        isActive: true,
+        onboardingCompleted: true,
+        reputationScore: true,
+        tasksCompletedCount: true,
+        daysWorkedCount: true,
+        team: { select: { name: true } },
+        reportingManager: { select: { name: true } },
+      },
+    }),
+    prisma.attendance.findUnique({
+      where: {
+        userId_date: { userId, date: today },
+      },
+      select: { checkInAt: true, checkOutAt: true },
+    }),
+    prisma.task.findFirst({
+      where: {
+        deletedAt: null,
+        status: { in: ['IN_PROGRESS', 'PENDING_VERIFICATION'] },
+        assignments: { some: { userId, isValidator: false } },
+      },
+      select: { title: true },
+      orderBy: { updatedAt: 'desc' },
+    }),
+    prisma.notification.count({
+      where: { userId, isRead: false },
+    }),
+  ]);
 
   if (!user) {
     res.status(404).json({ error: 'User not found' });
@@ -70,6 +103,13 @@ export async function me(req: Request, res: Response): Promise<void> {
     !user.name.startsWith('Wallet ')
   );
 
+  const isCheckedIn =
+    !!todayAttendance?.checkInAt && !todayAttendance.checkOutAt;
+  const hoursWorked =
+    todayAttendance?.checkInAt
+      ? formatHoursWorked(todayAttendance.checkInAt, todayAttendance.checkOutAt)
+      : '0m';
+
   res.json({
     user: {
       id: user.id,
@@ -77,6 +117,7 @@ export async function me(req: Request, res: Response): Promise<void> {
       name: user.fullName ?? user.name,
       email: user.email ?? null,
       avatarUrl,
+      picture: avatarUrl,
       role: user.role,
       status: user.isActive ? 'ACTIVE' : 'INACTIVE',
       onboardingComplete: user.onboardingCompleted,
@@ -86,6 +127,10 @@ export async function me(req: Request, res: Response): Promise<void> {
       daysWorked: user.daysWorkedCount ?? 0,
       team: user.team?.name ?? null,
       reportingTo: user.reportingManager?.name ?? null,
+      isCheckedIn,
+      currentTask: currentTask?.title ?? null,
+      hoursWorked,
+      notifications: notificationsCount,
     },
   });
 }
