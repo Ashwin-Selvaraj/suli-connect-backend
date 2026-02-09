@@ -34,25 +34,41 @@ function formatHoursWorked(checkInAt: Date, checkOutAt: Date): string {
   return `${m}m`;
 }
 
-function formatSummary(summary: {
-  id: string;
-  date: Date;
-  firstCheckIn: Date | null;
-  lastCheckOut: Date | null;
-  totalWorkMinutes: number;
-  totalBreakMinutes: number;
-  sessionsCount: number;
-  status: string;
-}) {
+function formatSummary(
+  summary: {
+    id: string;
+    date: Date;
+    firstCheckIn: Date | null;
+    lastCheckOut: Date | null;
+    totalWorkMinutes: number;
+    totalBreakMinutes: number;
+    sessionsCount: number;
+    status: string;
+    currentSessionStartedAt?: Date | null;
+  }
+) {
+  let totalMins = summary.totalWorkMinutes;
+  if (summary.currentSessionStartedAt) {
+    totalMins += Math.floor(
+      (Date.now() - summary.currentSessionStartedAt.getTime()) / 60_000
+    );
+  }
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  const hoursWorked = h > 0 ? `${h}h ${m}m` : `${m}m`;
+
   return {
     id: summary.id,
     date: summary.date,
     firstCheckIn: summary.firstCheckIn,
     lastCheckOut: summary.lastCheckOut,
-    totalWorkMinutes: summary.totalWorkMinutes,
+    totalWorkMinutes: totalMins,
+    totalWorkedSeconds: totalMins * 60,
+    currentSessionStartedAt: summary.currentSessionStartedAt?.toISOString() ?? null,
     totalBreakMinutes: summary.totalBreakMinutes,
     sessionsCount: summary.sessionsCount,
     status: summary.status,
+    hoursWorked,
   };
 }
 
@@ -68,28 +84,40 @@ export async function dailySummary(req: Request, res: Response): Promise<void> {
     const userId = req.user!.id;
 
     const summary = await attendanceService.getDailySummary(userId, date);
+    const formatted = formatSummary(summary);
 
-    res.json({ summary: formatSummary(summary) });
+    res.json({ summary: formatted });
   } catch (err) {
     res.status(500).json({ error: 'Failed to get daily summary' });
   }
 }
 
+/** GET /attendance/me - Daily summary for a date (uses event-sourced data) */
 export async function me(req: Request, res: Response): Promise<void> {
   const dateStr = req.query.date as string;
   const date = dateStr ? new Date(dateStr) : new Date();
   date.setHours(0, 0, 0, 0);
+  const userId = req.user!.id;
 
-  const attendance = await prisma.attendance.findUnique({
-    where: {
-      userId_date: {
-        userId: req.user!.id,
-        date,
-      },
-    },
+  const summary = await attendanceService.getDailySummary(userId, date);
+  let totalMins = summary.totalWorkMinutes;
+  if (summary.currentSessionStartedAt) {
+    totalMins += Math.floor(
+      (Date.now() - summary.currentSessionStartedAt.getTime()) / 60_000
+    );
+  }
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  const hoursWorked = h > 0 ? `${h}h ${m}m` : `${m}m`;
+
+  res.json({
+    date: summary.date,
+    checkInAt: summary.firstCheckIn,
+    checkOutAt: summary.lastCheckOut,
+    totalWorkMinutes: totalMins,
+    hoursWorked,
+    status: summary.status,
   });
-
-  res.json(attendance ?? { date, checkInAt: null, checkOutAt: null });
 }
 
 /** GET /attendance/today - Enriched today's attendance for current user */
@@ -98,37 +126,35 @@ export async function today(req: Request, res: Response): Promise<void> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const attendance = await prisma.attendance.findUnique({
-    where: { userId_date: { userId, date: today } },
-    include: { suliLocation: { select: { id: true, name: true } } },
-  });
+  const summary = await attendanceService.getDailySummary(userId, today);
 
-  if (!attendance) {
+  if (!summary.firstCheckIn && !summary.lastCheckOut && summary.sessionsCount === 0) {
     res.json({ attendance: null });
     return;
   }
 
-  let hoursWorked: string | null = null;
-  if (attendance.checkInAt && attendance.checkOutAt) {
-    hoursWorked = formatHoursWorked(attendance.checkInAt, attendance.checkOutAt);
-  } else if (attendance.checkInAt) {
-    hoursWorked = formatHoursWorked(attendance.checkInAt, new Date());
+  // Include current session when checked in (timer continues from previous sessions)
+  let totalMins = summary.totalWorkMinutes;
+  if (summary.currentSessionStartedAt) {
+    totalMins += Math.floor(
+      (Date.now() - summary.currentSessionStartedAt.getTime()) / 60_000
+    );
   }
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  const hoursWorked = h > 0 ? `${h}h ${m}m` : `${m}m`;
 
   res.json({
     attendance: {
-      id: attendance.id,
-      checkInAt: attendance.checkInAt,
-      checkOutAt: attendance.checkOutAt,
-      latitude: attendance.latitude,
-      longitude: attendance.longitude,
+      id: summary.id,
+      checkInAt: summary.firstCheckIn,
+      checkOutAt: summary.lastCheckOut,
       hoursWorked,
-      allowanceAmount:
-        attendance.allowanceAmount != null ? Number(attendance.allowanceAmount) : null,
-      allowanceCurrency: attendance.allowanceCurrency,
-      allowanceType: attendance.allowanceType,
-      suliLocationId: attendance.suliLocationId,
-      suliLocationName: attendance.suliLocation?.name ?? null,
+      totalWorkMinutes: totalMins,
+      totalWorkedSeconds: totalMins * 60,
+      currentSessionStartedAt: summary.currentSessionStartedAt?.toISOString() ?? null,
+      sessionsCount: summary.sessionsCount,
+      status: summary.status,
     },
   });
 }

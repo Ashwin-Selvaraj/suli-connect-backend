@@ -5,6 +5,7 @@ import { prisma } from '../../prisma/client';
 import { canManage } from '../../common/hierarchy';
 import { getPagination, paginate } from '../../common/utils';
 import type { UserRole } from '../../common/types';
+import * as attendanceService from '../attendance/attendance.service';
 
 const createSchema = z.object({
   phone: z.string().min(10),
@@ -23,17 +24,6 @@ const updateSchema = createSchema.partial().extend({
   password: z.string().min(6).optional(),
 });
 
-function formatHoursWorked(checkInAt: Date, checkOutAt: Date | null): string {
-  const end = checkOutAt ?? new Date();
-  const ms = end.getTime() - checkInAt.getTime();
-  const totalMins = Math.floor(ms / 60_000);
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
-  if (h > 0 && m > 0) return `${h}h ${m}m`;
-  if (h > 0) return `${h}h`;
-  return `${m}m`;
-}
-
 export async function me(req: Request, res: Response): Promise<void> {
   if (!req.user) {
     res.status(401).json({ error: 'Unauthorized' });
@@ -43,7 +33,7 @@ export async function me(req: Request, res: Response): Promise<void> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const [user, todayAttendance, currentTask, notificationsCount] = await Promise.all([
+  const [user, dailySummary, currentTask, notificationsCount] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId, deletedAt: null },
       select: {
@@ -65,12 +55,7 @@ export async function me(req: Request, res: Response): Promise<void> {
         reportingManager: { select: { name: true } },
       },
     }),
-    prisma.attendance.findUnique({
-      where: {
-        userId_date: { userId, date: today },
-      },
-      select: { checkInAt: true, checkOutAt: true },
-    }),
+    attendanceService.getDailySummary(userId, today),
     prisma.task.findFirst({
       where: {
         deletedAt: null,
@@ -103,12 +88,17 @@ export async function me(req: Request, res: Response): Promise<void> {
     !user.name.startsWith('Wallet ')
   );
 
-  const isCheckedIn =
-    !!todayAttendance?.checkInAt && !todayAttendance.checkOutAt;
-  const hoursWorked =
-    todayAttendance?.checkInAt
-      ? formatHoursWorked(todayAttendance.checkInAt, todayAttendance.checkOutAt)
-      : '0m';
+  const isCheckedIn = dailySummary.status === 'NEEDS_VERIFICATION';
+  // Include current session when checked in (timer continues from previous sessions)
+  let totalMins = dailySummary.totalWorkMinutes;
+  if (dailySummary.currentSessionStartedAt) {
+    totalMins += Math.floor(
+      (Date.now() - dailySummary.currentSessionStartedAt.getTime()) / 60_000
+    );
+  }
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  const hoursWorked = h > 0 ? `${h}h ${m}m` : `${m}m`;
 
   res.json({
     user: {
@@ -130,6 +120,9 @@ export async function me(req: Request, res: Response): Promise<void> {
       isCheckedIn,
       currentTask: currentTask?.title ?? null,
       hoursWorked,
+      totalWorkMinutes: totalMins,
+      totalWorkedSeconds: totalMins * 60,
+      currentSessionStartedAt: dailySummary.currentSessionStartedAt?.toISOString() ?? null,
       notifications: notificationsCount,
     },
   });

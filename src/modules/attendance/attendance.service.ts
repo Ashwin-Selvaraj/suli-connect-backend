@@ -4,9 +4,14 @@
  */
 
 import { prisma } from '../../prisma/client';
-import type { AttendanceEventType, DeviceType, DailySummaryStatus } from '@prisma/client';
 
-const MIN_SESSION_MINUTES = 15;
+/** Attendance event types from schema – use literals to avoid Prisma client export issues */
+type AttendanceEventType = 'CHECK_IN' | 'CHECK_OUT';
+type DeviceType = 'MOBILE' | 'DESKTOP';
+type DailySummaryStatus = 'PRESENT' | 'PARTIAL' | 'ABSENT' | 'NEEDS_VERIFICATION';
+
+/** Minimum session length to count as a "break-bounded" session for break calculation. All paired sessions count toward totalWorkMinutes. */
+const MIN_SESSION_FOR_BREAK_MINUTES = 15;
 
 export type CheckInPayload = {
   latitude?: number;
@@ -67,9 +72,9 @@ type EventRow = { id: string; eventType: AttendanceEventType; timestamp: Date };
  * Compute daily summary from raw events.
  * - Pairs CHECK_IN → CHECK_OUT in order.
  * - Ignores CHECK_OUT without prior CHECK_IN.
- * - Ignores sessions < MIN_SESSION_MINUTES.
- * - totalBreakMinutes = gaps between sessions.
- * - NEEDS_VERIFICATION if last event is CHECK_IN with no pair.
+ * - All paired sessions count toward totalWorkMinutes and sessionsCount.
+ * - totalBreakMinutes = gaps between sessions (only between sessions meeting min duration).
+ * - Status: ABSENT only when no check-in at all; PARTIAL/PRESENT when any work; NEEDS_VERIFICATION if last event is CHECK_IN with no pair.
  */
 export async function computeAndStoreDailySummary(
   userId: string,
@@ -83,6 +88,7 @@ export async function computeAndStoreDailySummary(
   totalBreakMinutes: number;
   sessionsCount: number;
   status: DailySummaryStatus;
+  currentSessionStartedAt: Date | null;
 }> {
   const dayStart = new Date(date);
   dayStart.setHours(0, 0, 0, 0);
@@ -98,8 +104,9 @@ export async function computeAndStoreDailySummary(
     select: { id: true, eventType: true, timestamp: true },
   });
 
-  const { firstCheckIn, lastCheckOut, totalWorkMinutes, totalBreakMinutes, sessionsCount, status } =
-    computeFromEvents(events as EventRow[]);
+  const computed = computeFromEvents(events as EventRow[]);
+  const { firstCheckIn, lastCheckOut, totalWorkMinutes, totalBreakMinutes, sessionsCount, status, currentSessionStartedAt } =
+    computed;
 
   const summary = await prisma.attendanceDailySummary.upsert({
     where: {
@@ -134,6 +141,7 @@ export async function computeAndStoreDailySummary(
     totalBreakMinutes: summary.totalBreakMinutes,
     sessionsCount: summary.sessionsCount,
     status: summary.status,
+    currentSessionStartedAt,
   };
 }
 
@@ -144,6 +152,8 @@ function computeFromEvents(events: EventRow[]): {
   totalBreakMinutes: number;
   sessionsCount: number;
   status: DailySummaryStatus;
+  /** When status is NEEDS_VERIFICATION: timestamp of the open CHECK_IN (current session start) */
+  currentSessionStartedAt: Date | null;
 } {
   let firstCheckIn: Date | null = null;
   let lastCheckOut: Date | null = null;
@@ -162,11 +172,12 @@ function computeFromEvents(events: EventRow[]): {
       // CHECK_OUT
       if (pendingCheckIn !== null) {
         const sessionMinutes = Math.floor((e.timestamp.getTime() - pendingCheckIn.getTime()) / 60_000);
-        if (sessionMinutes >= MIN_SESSION_MINUTES) {
-          totalWorkMinutes += sessionMinutes;
-          sessionsCount += 1;
-          lastCheckOut = e.timestamp;
-          // Break = time from last session end to this check-in
+        lastCheckOut = e.timestamp;
+        // Count all paired sessions toward total work and session count (so hours worked and status reflect actual presence)
+        totalWorkMinutes += sessionMinutes;
+        sessionsCount += 1;
+        // Break = time from last session end to this check-in (only between sessions that meet min duration)
+        if (sessionMinutes >= MIN_SESSION_FOR_BREAK_MINUTES) {
           if (lastSessionEnd !== null) {
             totalBreakMinutes += Math.floor(
               (pendingCheckIn.getTime() - lastSessionEnd.getTime()) / 60_000
@@ -181,15 +192,16 @@ function computeFromEvents(events: EventRow[]): {
   }
 
   const hasOpenCheckIn = pendingCheckIn !== null;
+  const checkedInAtLeastOnce = firstCheckIn !== null;
   let status: DailySummaryStatus;
-  if (sessionsCount === 0 && !hasOpenCheckIn) {
+  if (!checkedInAtLeastOnce && !hasOpenCheckIn) {
     status = 'ABSENT';
   } else if (hasOpenCheckIn) {
     status = 'NEEDS_VERIFICATION';
-  } else if (sessionsCount > 0 && totalWorkMinutes >= 360) {
+  } else if (totalWorkMinutes >= 360) {
     status = 'PRESENT'; // 6+ hours
   } else {
-    status = 'PARTIAL';
+    status = 'PARTIAL'; // checked in / had sessions but < 6h
   }
 
   return {
@@ -199,6 +211,7 @@ function computeFromEvents(events: EventRow[]): {
     totalBreakMinutes,
     sessionsCount,
     status,
+    currentSessionStartedAt: hasOpenCheckIn ? pendingCheckIn : null,
   };
 }
 
@@ -215,6 +228,7 @@ export async function getDailySummary(
   totalBreakMinutes: number;
   sessionsCount: number;
   status: DailySummaryStatus;
+  currentSessionStartedAt: Date | null;
 }> {
   const dayStart = new Date(date);
   dayStart.setHours(0, 0, 0, 0);
