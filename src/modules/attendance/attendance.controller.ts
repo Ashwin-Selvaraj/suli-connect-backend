@@ -233,6 +233,20 @@ export async function checkIn(req: Request, res: Response): Promise<void> {
   try {
     const body = eventPayloadSchema.parse(req.body ?? {});
     const userId = req.user!.id;
+
+    // Require coordinates for geofenced check-in
+    if (body.latitude == null || body.longitude == null) {
+      res.status(400).json({ error: 'Location (latitude & longitude) is required for check-in' });
+      return;
+    }
+
+    // Enforce SULI geofence: user must be within radiusMetres of at least one active SuliLocation.
+    const suliLocation = await findValidSuliLocationOrThrow(
+      body.latitude,
+      body.longitude,
+      body.locationId
+    );
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -240,7 +254,8 @@ export async function checkIn(req: Request, res: Response): Promise<void> {
       latitude: body.latitude,
       longitude: body.longitude,
       accuracy: body.accuracy,
-      locationId: body.locationId,
+      // Always associate with the validated SULI location
+      locationId: suliLocation.id,
       taskId: body.taskId,
       deviceType: body.deviceType as 'MOBILE' | 'DESKTOP' | undefined,
     });
@@ -260,8 +275,82 @@ export async function checkIn(req: Request, res: Response): Promise<void> {
       res.status(400).json({ error: 'Invalid input', details: err.errors });
       return;
     }
+    if (err instanceof Error) {
+      // Surface geofence / configuration errors to the client
+      res.status(400).json({ error: err.message });
+      return;
+    }
     res.status(500).json({ error: 'Check-in failed' });
   }
+}
+
+/**
+ * Find a SULI location that contains the given coordinates.
+ * - If a specific locationId is provided, validate against that one.
+ * - Otherwise, find any active SuliLocation whose radiusMetres contains the point.
+ * Throws an Error if no valid SuliLocation is found.
+ */
+async function findValidSuliLocationOrThrow(
+  latitude: number,
+  longitude: number,
+  requestedLocationId?: string
+) {
+  // Prefer a specific SULI location if explicitly requested
+  if (requestedLocationId) {
+    const location = await prisma.suliLocation.findFirst({
+      where: { id: requestedLocationId, isActive: true },
+    });
+    if (!location) {
+      throw new Error('Invalid SULI location');
+    }
+
+    const distance = haversineMetres(latitude, longitude, location.latitude, location.longitude);
+    if (distance > location.radiusMetres) {
+      throw new Error('Outside allowed SULI location radius');
+    }
+    return location;
+  }
+
+  // Otherwise, find any active SULI location that contains this point
+  const locations = await prisma.suliLocation.findMany({
+    where: { isActive: true },
+  });
+
+  if (!locations.length) {
+    throw new Error('No active SULI locations configured');
+  }
+
+  for (const loc of locations) {
+    const distance = haversineMetres(latitude, longitude, loc.latitude, loc.longitude);
+    if (distance <= loc.radiusMetres) {
+      return loc;
+    }
+  }
+
+  throw new Error('Outside all allowed SULI locations');
+}
+
+/** Haversine distance between two coordinates, in metres. */
+function haversineMetres(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371000; // Earth radius in metres
+
+  const φ1 = toRad(lat1);
+  const φ2 = toRad(lat2);
+  const Δφ = toRad(lat2 - lat1);
+  const Δλ = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
 }
 
 /** POST /attendance/check-out – Append-only; always inserts new event */
